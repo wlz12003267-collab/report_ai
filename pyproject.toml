@@ -1,0 +1,56 @@
+[project]
+name = "fh-v3"
+version = "0.1.0"
+description = "设备故障日报/周报/月报自动生成 Agent（LangGraph 版）"
+requires-python = ">=3.10"
+dependencies = [
+    # LangChain 核心（0.3 系列，与 langgraph 0.2 兼容）
+    "langchain>=0.3.7,<0.4",
+    "langchain-core>=0.3.15,<0.4",
+    "langchain-community>=0.3.5,<0.4",
+    "langchain-huggingface>=0.1.2,<0.2",
+    "langchain-text-splitters>=0.3.0,<0.4",
+    # LangGraph
+    "langgraph>=0.2.45,<0.3",
+    "langgraph-checkpoint>=2.0.2,<3",
+    # 模型与向量
+    "transformers>=4.44.0",
+    "sentence-transformers>=3.0.1",
+    "torch>=2.5.1",
+    "torchvision>=0.20.1",
+    "torchaudio>=2.5.1",
+    "chromadb>=0.5.17,<0.6",
+    "langchain-chroma>=0.1.4,<0.2",
+    # 服务与工具
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.1",
+    "pydantic>=2.7.4,<3",
+    "pydantic-settings>=2.3.0",
+    "python-dotenv>=1.0.1",
+    "langsmith>=0.1.125,<0.2",
+    # 数据库
+    "pymysql>=1.1.1",
+    "psycopg>=3.2.1",
+    "apache-iotdb>=0.13.0",
+    "pyyaml>=6.0.2",
+    "sqlalchemy>=2.0.54",
+    "pandas>=2.3.3",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "httpx>=0.28.1",
+    "accelerate>=1.15.0",
+    "safetensors>=0.8.0",
+    "langchain-openai>=0.3.19",
+    "tokenizers>=0.20.3",
+    "huggingface-hub>=0.36.2",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
+torchaudio = { index = "pytorch-cu124" }
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
