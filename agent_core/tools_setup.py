@@ -363,7 +363,7 @@ def query_device_faultsCatalog(
         total_hour:      该类故障累计停机小时
 
     口径说明：
-        - 只统计 state = 4（设备故障）。待机(2)与人为停止(3)是计划性停机，不属于设备问题。
+        - 只统计 state = 3（设备故障），不统计待机(2)与通讯故障(4)。
         - 只统计 is_deleted = 0 的记录，排除已删除的脏数据。
         - 时长按「与统计窗口的交集」计算，跨窗口的故障只计窗内部分。
     """
@@ -411,7 +411,7 @@ def query_device_faultsCatalog(
         WHERE error_code IS NOT NULL
         AND factory_code = %s
         AND workshop_id = %s
-        AND state IN (3,4)
+        AND state = 3
         AND is_deleted = 0
         AND begin_time < %s
         AND (end_time IS NULL OR end_time > %s)
@@ -469,7 +469,7 @@ def query_alarm_sequence(
     返回每条报警事件：
         machine_id:       设备编号
         error_code:       报警/故障编码
-        state:        原始上报状态（2=待机 / 3=人为停止 / 4=设备故障）
+        state:        原始上报状态（2=待机 / 3=设备故障 / 4=通讯故障）
         begin_time:       报警开始时间
         end_time:         报警结束时间（未恢复为 None）
         duration_min:     本次持续时间(分钟)
@@ -503,7 +503,7 @@ def query_alarm_sequence(
         WHERE error_code IS NOT NULL
           AND factory_code = %s
           AND workshop_id = %s
-          AND state IN (3,4)
+          AND state = 3
           AND is_deleted = 0
           AND begin_time < %s
           AND (end_time IS NULL OR end_time > %s)

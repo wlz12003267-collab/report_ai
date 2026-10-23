@@ -7,7 +7,7 @@
 2. **结构化优先**：先排「结论 -> 证据 -> 动作」，不按数据源顺序罗列。
 3. **图表用纯 SVG 手绘**：不引入 matplotlib 图片，避免中文字体在图片里变方块，同时保证矢量清晰、文件小。
 4. **缺失即降级**：真实数据里某个模块可能为空（这天没报警、趋势不足两月），缺就跳过该章节，不占位、不写"暂无数据"凑数。
-5. **口径按业务约定**：故障类统计覆盖 device_state.state 的 2、3、4 三类，正文与页脚都不展开解释，只在页脚保留一行据实说明。
+5. **口径按业务约定**：故障类统计仅覆盖 device_state.state = 3（设备故障），正文与页脚保持一致口径。
 6. **只呈现结论，不呈现数据问题**：这是给管理层看的汇报材料，不承载取数过程的疑点。数据层面的核对由生成侧（agent 日志）负责。
 
 用法：
@@ -375,9 +375,14 @@ def build_summary_cards(report: Dict[str, Any]) -> str:
 
     # 稼动率：从 breaking_time 的 facts 拿不到，退而求其次用 origin_data 的中位数
     act_pct = None
+    running_machine_count = 0
     for s in sections:
         if _s(s.get("section")) == "device_breaking_time":
-            vals = [_f(r.get("green_percent")) for r in (s.get("origin_data") or [])
+            origin_rows = s.get("origin_data") or []
+            running_machine_count = len({
+                _s(r.get("machine_id")) for r in origin_rows if _s(r.get("machine_id"))
+            })
+            vals = [_f(r.get("green_percent")) for r in origin_rows
                     if _f(r.get("green_percent")) > 0]
             if vals:
                 vals.sort()
@@ -429,7 +434,9 @@ def build_summary_cards(report: Dict[str, Any]) -> str:
             f'<div class="gauge-row"><div class="gauge-box">'
             f'{svg_gauge(act_pct, label="时间稼动率中位数")}'
             f'<div class="gauge-note">时间稼动率 = 运行时长 / 统计时长，'
-            f'低于 80% 说明设备有效产出时间不足。'
+            f'低于 80% 说明设备有效产出时间不足。<br/>'
+            f'车间开机数量（device_state_compute）：'
+            f'<b>{running_machine_count} 台</b>。'
             f'该值为设备中位数，非全车间加权值。</div></div></div>'
         )
     return "".join(out)
@@ -626,83 +633,44 @@ def build_trend_section(report: Dict[str, Any]) -> str:
 
 
 def derive_actions(report: Dict[str, Any]) -> List[Dict[str, str]]:
-    """从结构化结果推导带优先级的行动清单。
+    """从 actions 章节的 LLM 输出提取治理行动清单。"""
+    chapter = (report.get("chapter_analysis") or {}).get("actions") or {}
+    if _s(chapter.get("status")) != "ok":
+        return []
 
-    不直接抄 LLM 的建议 —— LLM 的建议常常停留在「加强管理」。
-    这里由规则推导，保证每条都有明确对象、动作和数据依据；
-    LLM 只负责在正文里解释这套排序为什么合理。
-
-    返回值供 pipeline（喂给章节分析）与渲染器（画表格）共用，
-    确保两边看到的是同一份清单。
-    """
-    actions: List[Dict[str, str]] = []
-
-    profiles = report.get("profiles") or []
-    pareto = report.get("pareto") or {}
-    hour_map = {_s(i.get("machine_id")): _f(i.get("red_hour"))
-                for i in (pareto.get("items") or [])}
-
-    for p in profiles:
-        ptype = _s(p.get("profile"))
-        mid = _s(p.get("machine_id"))
-        h = hour_map.get(mid)
-
-        if ptype in ("双高型", "大故障型"):
-            actions.append({
-                "priority": "P0", "target": mid,
-                "action": "拆解单次长停机过程，前置关键备件、补齐故障处置手册、"
-                          "对关键部件加装状态监测",
-                "basis": f"单次平均 {fmt(p.get('ave_stop_minutes'))} 分钟，"
-                         f"为中位数 {fmt(p.get('ave_vs_median'))} 倍"
-                         + (f"；本期累计停机 {fmt(h)} 小时" if h else ""),
-            })
-        elif ptype == "高频小停型":
-            actions.append({
-                "priority": "P1", "target": mid,
-                "action": "从触发源入手：来料稳定性、工艺参数窗口、传感器可靠性、"
-                          "程序逻辑逐项排查",
-                "basis": f"本期故障 {_i(p.get('red_state_num') or p.get('red_num'))} 次，"
-                         f"为中位数 {fmt(p.get('count_vs_median'))} 倍，"
-                         f"但单次仅 {fmt(p.get('ave_stop_minutes'))} 分钟",
-            })
-        elif ptype == "亚健康型":
-            actions.append({
-                "priority": "P2", "target": mid,
-                "action": "纳入重点巡检名单，设定频次与判定阈值，观察是否向高频或大故障演变",
-                "basis": "故障次数与单次时长均高于中位数但未达 2 倍",
-            })
-
-    for g in (report.get("alarm_groups") or [])[:2]:
-        seq = " · ".join(_s(c) for c in (g.get("codes") or []))
-        actions.append({
-            "priority": "P0", "target": _s(g.get("machine_id")),
-            "action": f"针对组合报警 {seq} 排查共同上游（气源/供电/通讯总线/冷却），"
-                      f"先修上游再评估下游报警是否消失",
-            "basis": f"{_i(g.get('event_count'))} 条报警集中在 {fmt(g.get('span_min'))} 分钟内，"
-                     f"累计停机 {fmt(g.get('combined_stop_min'))} 分钟",
-        })
-
-    trend = report.get("trend") or {}
-    if trend.get("is_abnormal"):
-        actions.append({
-            "priority": "P1", "target": "全车间",
-            "action": "建立月度停机台账并跟踪拐点，"
-                      "定位恶化起始月份对应的变更（设备、工艺、订单结构）",
-            "basis": f"最近月较历史均值变化 {fmt(trend.get('change_percent'))}%，属持续恶化",
-        })
+    highlights = chapter.get("highlights") or {}
+    lines: List[str] = []
+    if isinstance(highlights, dict):
+        lines = [_s(x).strip() for x in highlights.values() if _s(x).strip()]
+    elif isinstance(highlights, list):
+        lines = [_s(x).strip() for x in highlights if _s(x).strip()]
+    if not lines:
+        return []
 
     order = {"P0": 0, "P1": 1, "P2": 2}
-    actions.sort(key=lambda x: order.get(x["priority"], 9))
+    actions: List[Dict[str, str]] = []
+    for idx, line in enumerate(lines):
+        pri = "P0" if idx == 0 else ("P1" if idx == 1 else "P2")
+        for token in ("P0", "P1", "P2"):
+            if token in line:
+                pri = token
+                break
+        target = "全车间"
+        action = line
+        if "：" in line:
+            left, right = line.split("：", 1)
+            if 1 <= len(left.strip()) <= 24:
+                target = left.strip()
+                action = right.strip() or line
+        actions.append({
+            "priority": pri,
+            "target": target,
+            "action": action,
+            "basis": "来自 actions 章节 LLM 推理结论",
+        })
 
-    seen = set()
-    uniq: List[Dict[str, str]] = []
-    for a in actions:
-        k = (a["target"], a["action"][:20])
-        if k in seen:
-            continue
-        seen.add(k)
-        uniq.append(a)
-    return uniq
+    actions.sort(key=lambda x: order.get(x["priority"], 9))
+    return actions
 
 
 def build_actions_section(report: Dict[str, Any]) -> str:
@@ -724,7 +692,7 @@ def build_actions_section(report: Dict[str, Any]) -> str:
     return f"""
 <section class="block">
   <h2><span class="num">04</span>治理行动清单</h2>
-  <p class="lead">按优先级排序。P0 为本周期必须处理，P1 为本月内跟进，P2 为纳入常规管理。</p>
+  <p class="lead">由 LLM 基于结构化事实推理生成并按优先级排序。P0 为本周期必须处理，P1 为本月内跟进，P2 为纳入常规管理。</p>
   {chapter_note(report, "actions")}
   <table class="tbl act-tbl">
     <thead><tr><th style="width:44px">优先级</th><th style="width:88px">对象</th>
@@ -972,8 +940,8 @@ def render_html(report: Dict[str, Any]) -> str:
         build_gaps_section(report),
         f"""
 <div class="foot">
-口径说明：故障统计覆盖设备状态 2（待机）、3（人为停止）、4（设备故障），
-三类状态均计入故障时长与次数。
+口径说明：故障统计仅覆盖设备状态 3（设备故障），
+状态 2（待机）与状态 4（通讯故障）不计入故障时长与次数。
 时间稼动率 = 运行时长 / 统计时长，非真实 OEE（缺产量与良率数据）。
 本报告由设备数据自动分析生成，结构化指标来自数据库精确计算，
 文字结论由大模型基于上述指标生成，涉及根因的判断需现场核实。

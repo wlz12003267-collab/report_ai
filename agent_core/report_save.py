@@ -182,19 +182,21 @@ def build_section_map(analytics: Dict[str, Any],
                       sections: List[SectionResult]) -> Dict[str, Any]:
     """把预计算结果按「报告章节」重新组织，喂给章节级 LLM 分析。
 
-    注意这里刻意复用了渲染层的 derive_actions —— 行动清单既要被模型
-    解释，也要被画成表格，两边必须是同一份，否则会出现
-    「正文说有 3 条 P0，表格里只有 2 条」这种前后不一致。
+    行动清单章节不再预先规则生成动作，改为把结构化事实交给 LLM 推理，
+    由模型直接给出优先级动作建议。
     """
-    from report_pdf.renderer import derive_actions
-
     view = {
         "pareto": analytics.get("pareto") or {},
         "profiles": analytics.get("profiles") or [],
         "alarm_groups": analytics.get("alarm_groups") or [],
         "trend": analytics.get("trend") or {},
     }
-    view["actions"] = {"actions": derive_actions(view)}
+    view["actions"] = {
+        "pareto": view["pareto"],
+        "profiles": view["profiles"],
+        "alarm_groups": view["alarm_groups"],
+        "trend": view["trend"],
+    }
 
     return {
         "pareto": view["pareto"],
