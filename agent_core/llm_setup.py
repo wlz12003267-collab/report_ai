@@ -1,8 +1,9 @@
-"""LLM 加载（Qwen2.5-7B-Instruct，GPU 加速）。
+"""LLM 加载与连接。
 
 策略：
-- 有网络时：优先使用 vLLM 服务（或 ollama，取决于 settings.llm_backend）
-- 无网络 / vLLM 连接失败：回退到本地 load_llm()
+- vLLM 模式：仅通过 HTTP 调用独立推理服务
+- ollama 模式：通过 HTTP 调用 ollama 服务
+- local 模式：仅在显式配置时加载本地模型
 """
 from functools import lru_cache
 import socket
@@ -85,21 +86,23 @@ def build_remote_llm(base_url: str, model: str, api_key: str) -> ChatOpenAI:
 @lru_cache(maxsize=1)
 def get_llm():
     s = get_settings()
-    # 1) 配置为 vllm
+    # 1) 配置为 vLLM（独立推理服务）
     if s.llm_backend == "vllm":
         if can_reach(s.llm_base_url):
             print(f"连接vLLM服务: {s.llm_base_url} / {s.llm_model_name}")
             return build_remote_llm(s.llm_base_url, s.llm_model_name, s.llm_api_key)
-        print(f"vLLM 服务不可达: {s.llm_base_url}，回退本地模型")
+        raise ConnectionError(f"vLLM 服务不可达: {s.llm_base_url}")
     # 2) ollama
     if s.llm_backend == "ollama":
         if can_reach(s.llm_base_url):
             print(f"连接Ollama服务: {s.llm_base_url} / {s.llm_model_name}")
             return build_remote_llm(s.llm_base_url, s.llm_model_name, s.llm_api_key)
-        print(f"Ollama 服务不可达: {s.llm_base_url}，回退本地模型")
-    # 3) 远端不可达 → 本地transformers模型
-    print("远端服务不可用，使用本地transformers模型")
-    return load_llm()
+        raise ConnectionError(f"Ollama 服务不可达: {s.llm_base_url}")
+    # 3) 显式 local 模式
+    if s.llm_backend == "local":
+        print("使用本地transformers模型")
+        return load_llm()
+    raise ValueError(f"不支持的 llm_backend: {s.llm_backend}")
 
 # if __name__ == "__main__":
 #     llm = get_llm()

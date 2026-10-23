@@ -84,7 +84,7 @@ SECTION_SPEC: Dict[str, Dict] = {
             "待机、计划停机、人为停止的时长（本数据源只统计设备故障）",
         ],
         "notes": (
-            "本数据源已按 raw_state = 4（设备故障）筛选，待机(2)和人为停止(3) "
+            "本数据源已按 raw_state = 3（设备故障）筛选，待机(2)和通讯故障(4) "
             "不在其中。因此这里的停机时长是**纯设备故障**造成的，"
             "不要把它解释成「停机总时长」，也不要说「可能包含计划停机」。"
         ),
@@ -109,7 +109,7 @@ SECTION_SPEC: Dict[str, Dict] = {
             "待机、计划停机、人为停止（本数据源只含设备故障）",
         ],
         "notes": (
-            "本数据源已按 raw_state = 4（设备故障）+ 未删除 筛选，"
+            "本数据源已按 raw_state = 3（设备故障）+ 未删除 筛选，"
             "序列中相邻报警间隔 <= 5 分钟且编码不同的被归为同一组合事件。"
             "共现只说明「同时发生」，不直接等于因果，下结论时用「疑为」「指向」而非「因为」。"
         ),
@@ -408,14 +408,40 @@ def build_chapter_facts(chapter: str, payload, by_name: Dict[str, object]) -> st
     elif chapter == "actions":
         if not isinstance(payload, dict):
             return ""
-        acts = payload.get("actions") or []
-        if not acts:
+        profiles = payload.get("profiles") or []
+        groups = payload.get("alarm_groups") or []
+        trend = payload.get("trend") or {}
+        pareto = payload.get("pareto") or {}
+        if not (profiles or groups or trend):
             return ""
-        lines.append(f"共生成 {len(acts)} 条行动项。")
-        for a in acts:
+        items = pareto.get("items") or []
+        if items:
+            top = items[0]
             lines.append(
-                f"[{a.get('priority')}] {a.get('target')}：{a.get('action')}。"
-                f"依据：{a.get('basis')}"
+                f"当前停机损失最高设备为 {top.get('machine_id')}，"
+                f"停机 {_f(top.get('red_hour')):.2f} 小时，占 {_f(top.get('share_percent')):.1f}%。"
+            )
+        for p in profiles:
+            if str(p.get("profile")) == "正常":
+                continue
+            lines.append(
+                f"{p.get('machine_id')} 分型 {p.get('profile')}，"
+                f"故障 {_i(p.get('red_state_num') or p.get('red_num'))} 次，"
+                f"单次平均 {_f(p.get('ave_stop_minutes')):.2f} 分钟，"
+                f"累计停机 {_f(p.get('stop_hour_est')):.2f} 小时。"
+            )
+        for g in groups[:3]:
+            seq = " → ".join(str(c) for c in (g.get("codes") or []))
+            lines.append(
+                f"{g.get('machine_id')} 组合报警 {seq}，"
+                f"{_i(g.get('event_count'))} 条报警集中在 {_f(g.get('span_min')):.1f} 分钟内，"
+                f"累计停机 {_f(g.get('combined_stop_min')):.1f} 分钟。"
+            )
+        if trend:
+            lines.append(
+                f"月度趋势：最近月 {_f(trend.get('latest_hour')):.2f} 小时，"
+                f"历史均值 {_f(trend.get('history_avg_hour')):.2f} 小时，"
+                f"变化 {_f(trend.get('change_percent')):+.2f}%。"
             )
 
     elif chapter == "trend":
